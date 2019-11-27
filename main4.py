@@ -36,6 +36,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 from sklearn import metrics
+from sklearn.model_selection import KFold
 
 y_column_name = 'Total_Income'
 
@@ -46,7 +47,7 @@ y_column_name = 'Total_Income'
 trainDataPath = "data/tcd-ml-1920-group-income-train.csv"
 testDataPath = "data/tcd-ml-1920-group-income-test.csv"
 subDataPath = "data/tcd-ml-1920-group-income-submission.csv"
-subDataPath_result = "data/tcd-ml-1920-group-income-submission_result.csv"
+subDataPath_result = "data/tcd-ml-1920-group-income-submission_result_CV.csv"
 
 #rename_columns
 def rename_column_name(dataset):
@@ -114,7 +115,7 @@ def preprocess_dataset(dataset1):
     process_Satisfation(dataset)
     process_Gender(dataset)
     process_Country(dataset)
-#    process_Size_of_City(dataset)
+    # process_Size_of_City(dataset)
     process_Profession(dataset)
     process_Degree(dataset)
     process_Hair(dataset)
@@ -122,7 +123,7 @@ def preprocess_dataset(dataset1):
     
   #  process_Crime_Level(dataset)####### not needed
   #  process_Age(dataset)#not needed
-  #  process_Glasses(dataset)# not needed
+  #  process_Glasses(dataset)# not needMissinged
   #  process_Height(dataset)# not needed
     return dataset
 
@@ -152,7 +153,7 @@ def process_Gender(dataset):
     dataset['Gender'].replace('f', 'female', inplace=True)
 
 def process_Age(dataset):
-    age_median = dataset['Age'].median()
+    age_median = dataset['Age'].median() 
     dataset['Age'].replace(np.nan, age_median, inplace=True)
     dataset['Age'] = (dataset['Age'] * dataset['Age']) ** (0.5)## ???
 
@@ -258,6 +259,39 @@ def predict_prod_data2(X_test, clf):
     df_test_result['Total Yearly Income [EUR]'] = YDataFrame.iloc[:,-1]
     df_test_result.to_csv(subDataPath_result, index = False)
 
+def cross_val_cat(train_data, y, X_test):
+    k = 2
+    iter_rounds = 20000
+    y_test_pred = [0] * len(X_test)
+    kf = KFold(n_splits = k, random_state = 1, shuffle = True)
+
+    cat_model = CatBoostRegressor(iterations=iter_rounds, task_type="GPU")
+    for i, (train_index, val_index) in enumerate(kf.split(train_data)):
+        y_train, y_val = y.iloc[train_index], y.iloc[val_index]
+        X_train, X_val = train_data.iloc[train_index], train_data.iloc[val_index]
+        print("Fold number ", i)
+
+        y_train_log = np.log(y_train)
+        y_val_log = np.log(y_val)
+        trn_data = Pool(X_val, label=y_val_log)
+
+        cat_model.fit(X_train, y_train_log, eval_set=trn_data, use_best_model=True)
+        
+        y_pred_log = cat_model.predict(X_val)
+        y_pred = np.exp(y_pred_log)
+        calculate_metrics(y_val,y_pred)
+
+        y_test_pred_log = cat_model.predict(X_test)
+        y_test_pred += np.exp(y_test_pred_log)
+
+    mean_y_pred = y_test_pred/k
+    YDataFrame = pd.DataFrame(mean_y_pred)
+
+    df_test_result = pd.read_csv(subDataPath)
+    df_test_result['Total Yearly Income [EUR]'] = YDataFrame.iloc[:,-1]
+    df_test_result.to_csv(subDataPath_result, index = False)
+
+
 
 #### 1. read data #######
 train_data, test_data = read_data(trainDataPath, testDataPath)
@@ -286,7 +320,6 @@ train_data_preprocessed=train_data_preprocessed.append(test_data_preprocessed)
 train_data_preprocessed.isnull().sum()
 ############################ 
 
-
 ######## 5. Do hot encoding #########
 #encoding_column_list = ['Housing', 'Satisfation', 'Gender', 'Country', 'Profession', 'Degree', 'Hair']
 
@@ -307,71 +340,73 @@ train_data_preprocessed.drop(y_column_name, axis=1, inplace=True)
 test_data_preprocessed.drop(y_column_name, axis=1, inplace=True)
 
 
-
 ####### 6. Training the model ############
 X_train, X_val, y_train, y_val = train_test_split(train_data_preprocessed, y, test_size=0.2, random_state=0)
 X_test = test_data_preprocessed.copy()
 
-#regressor_Linear = LinearRegression()
+##here cross_val_cat
+from catboost import CatBoostRegressor, Pool
+cross_val_cat(train_data_preprocessed, y, X_test)
+# #regressor_Linear = LinearRegression()
 
 
 
-##### 7. transform y ###############
-y_train_log = np.log(y_train)
-y_val_log = np.log(y_val)
-###################################
+# ##### 7. transform y ###############
+# y_train_log = np.log(y_train)
+# y_val_log = np.log(y_val)
+# ###################################
 
-X_train.isnull().sum()
-###### 8. fit model and predict the income ###############
-params = {
-          'max_depth': 20,
-          'learning_rate': 0.0005,
-          "boosting": "gbdt",
-          "bagging_seed": 11,
-          "metric": 'mae',
-          "verbosity": -1,
-         }
-# import lightgbm as lgb
-# trn_data = lgb.Dataset(X_train, label=y_train_log)
-# val_data = lgb.Dataset(X_val, label=y_val_log)
-#
-# clf = lgb.train(params, trn_data, 100000, valid_sets = [trn_data, val_data], verbose_eval=1000, early_stopping_rounds=500)
-#
-# y_pred_log = clf.predict(X_val)
+# X_train.isnull().sum()
+# ###### 8. fit model and predict the income ###############
+# params = {
+#           'max_depth': 20,
+#           'learning_rate': 0.0005,
+#           "boosting": "gbdt",
+#           "bagging_seed": 11,
+#           "metric": 'mae',
+#           "verbosity": -1,
+#          }
+# # import lightgbm as lgb
+# # trn_data = lgb.Dataset(X_train, label=y_train_log)
+# # val_data = lgb.Dataset(X_val, label=y_val_log)
+# #
+# # clf = lgb.train(params, trn_data, 100000, valid_sets = [trn_data, val_data], verbose_eval=1000, early_stopping_rounds=500)
+# #
+# # y_pred_log = clf.predict(X_val)
+# # y_pred = np.exp(y_pred_log)
+
+# ###### 8.2 fit model and predict the income using Catboost ###############
+# ## To run pip install catboost and tensorflow-gpu
+
+# from catboost import CatBoostRegressor, Pool
+# trn_data = Pool(X_val, label=y_val_log)
+
+# cat_model = CatBoostRegressor(iterations=20000, task_type="GPU")
+# cat_model.fit(X_train, y_train_log, eval_set=trn_data, use_best_model=True)
+
+
+
+# y_pred_log = cat_model.predict(X_val)
 # y_pred = np.exp(y_pred_log)
 
-###### 8.2 fit model and predict the income using Catboost ###############
-## To run pip install catboost and tensorflow-gpu
 
-from catboost import CatBoostRegressor, Pool
-trn_data = Pool(X_val, label=y_val_log)
+# #regressor_Linear.fit(X_train, y_train_log)
+# #y_pred = np.exp(regressor_Linear.predict(X_test))
 
-cat_model = CatBoostRegressor(iterations=20000, task_type="GPU")
-cat_model.fit(X_train, y_train_log, eval_set=trn_data, use_best_model=True)
+# ######## 9. calculate metrics ######################
+# calculate_metrics(y_val,y_pred)
 
+# #calculate_metrics(y_test,y_pred)
+# #Mean Absolute Error: 13328734.232115386
+# #Mean Squared Error: 1.629745039516587e+17
+# #Root Mean Squared Error: 403701008.1132554
+# ###########################################
 
-
-y_pred_log = cat_model.predict(X_val)
-y_pred = np.exp(y_pred_log)
-
-
-#regressor_Linear.fit(X_train, y_train_log)
-#y_pred = np.exp(regressor_Linear.predict(X_test))
-
-######## 9. calculate metrics ######################
-calculate_metrics(y_val,y_pred)
-
-#calculate_metrics(y_test,y_pred)
-#Mean Absolute Error: 13328734.232115386
-#Mean Squared Error: 1.629745039516587e+17
-#Root Mean Squared Error: 403701008.1132554
-###########################################
-
-######## 10. Predict production data ################
-# predict_prod_data2(test_data_preprocessed, clf)
-predict_prod_data2(test_data_preprocessed, cat_model)
-#predict_prod_data(test_data_preprocessed, regressor_Linear)
-####################################################
+# ######## 10. Predict production data ################
+# # predict_prod_data2(test_data_preprocessed, clf)
+# predict_prod_data2(test_data_preprocessed, cat_model)
+# #predict_prod_data(test_data_preprocessed, regressor_Linear)
+# ####################################################
 
 
 
@@ -404,6 +439,15 @@ Mean Absolute Error: 8409.58350966533
 Mean Squared Error: 461781299.5351664
 Root Mean Squared Error: 21489.0972247595
 
+iterations = 60000
+Mean Absolute Error: 8378.461673578056
+Mean Squared Error: 475099853.7243708
+Root Mean Squared Error: 21796.785398869502
+
+iteration = 100000
+Mean Absolute Error: 8361.410307435952
+Mean Squared Error: 482027332.3600127
+Root Mean Squared Error: 21955.12086871791
 
 """
 
